@@ -1,10 +1,13 @@
-
 import React, { useState } from 'react';
-import { Shield, Mail, Link, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
+import { Shield, Mail, Link, User, LogIn } from 'lucide-react';
 import { EmailAnalyzer } from '../components/EmailAnalyzer';
 import { URLAnalyzer } from '../components/URLAnalyzer';
 import { SecurityHeader } from '../components/SecurityHeader';
 import { APIConfiguration } from '../components/APIConfiguration';
+import { AuthModal } from '../components/AuthModal';
+import { UserMenu } from '../components/UserMenu';
+import { HistoryModal } from '../components/HistoryModal';
+import { useAuth } from '@/hooks/useAuth';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState<'email' | 'url'>('email');
@@ -13,10 +16,42 @@ const Index = () => {
     urlVoidKey?: string;
     emailRepKey?: string;
   }>({});
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
       <APIConfiguration onConfigChange={setApiKeys} />
+      
+      {/* Header with Auth */}
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex justify-between items-center">
+          <div></div>
+          <div className="flex items-center space-x-4">
+            {user ? (
+              <UserMenu onShowHistory={() => setShowHistoryModal(true)} />
+            ) : (
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors duration-200"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Sign In</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
       
       <div className="container mx-auto px-4 py-8">
         <SecurityHeader />
@@ -82,6 +117,34 @@ const Index = () => {
           </div>
         </div>
 
+        {/* Authentication Benefits */}
+        {!user && (
+          <div className="max-w-4xl mx-auto mt-8">
+            <div className="bg-gradient-to-r from-green-600/10 to-blue-600/10 backdrop-blur-sm rounded-xl border border-green-500/20 p-6">
+              <h3 className="text-xl font-semibold text-white mb-4 flex items-center">
+                <User className="w-5 h-5 mr-2 text-green-400" />
+                Create an Account for Enhanced Features
+              </h3>
+              <div className="grid md:grid-cols-2 gap-4 text-slate-300">
+                <div className="space-y-2">
+                  <h4 className="font-medium text-green-400">Analysis History</h4>
+                  <p className="text-sm">Keep track of all your email and URL security analyses with detailed results and timestamps.</p>
+                </div>
+                <div className="space-y-2">
+                  <h4 className="font-medium text-blue-400">Secure & Private</h4>
+                  <p className="text-sm">Your analysis history is encrypted and only accessible to you. We never share your data.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAuthModal(true)}
+                className="mt-4 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-semibold transition-colors duration-200"
+              >
+                Get Started - It's Free
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Security Tips */}
         <div className="max-w-4xl mx-auto mt-8">
           <div className="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700 p-6">
@@ -114,6 +177,16 @@ const Index = () => {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)} 
+      />
+      <HistoryModal 
+        isOpen={showHistoryModal} 
+        onClose={() => setShowHistoryModal(false)} 
+      />
     </div>
   );
 };

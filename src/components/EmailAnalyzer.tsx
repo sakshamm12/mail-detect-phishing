@@ -1,9 +1,10 @@
-
 import React, { useState } from 'react';
 import { Mail, AlertTriangle, CheckCircle, XCircle, Search, Zap } from 'lucide-react';
 import { analyzeEmail } from '../utils/emailDetection';
 import { verifyEmailWithHunter, checkEmailReputation } from '../services/securityApis';
 import { SecurityResult } from './SecurityResult';
+import { useAuth } from '@/hooks/useAuth';
+import { useAnalysisHistory } from '@/hooks/useAnalysisHistory';
 
 interface EmailAnalyzerProps {
   apiKeys?: {
@@ -17,6 +18,8 @@ export const EmailAnalyzer: React.FC<EmailAnalyzerProps> = ({ apiKeys }) => {
   const [email, setEmail] = useState('');
   const [result, setResult] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const { user } = useAuth();
+  const { saveAnalysis } = useAnalysisHistory();
 
   const handleAnalyze = async () => {
     if (!email.trim()) return;
@@ -84,9 +87,20 @@ export const EmailAnalyzer: React.FC<EmailAnalyzerProps> = ({ apiKeys }) => {
       enhancedResult.isSafe = enhancedResult.score >= 70 && highSeverityIssues === 0;
       
       setResult(enhancedResult);
+      
+      // Save to history if user is authenticated
+      if (user) {
+        await saveAnalysis('email', email, enhancedResult);
+      }
     } catch (error) {
       console.error('Analysis error:', error);
-      setResult(analyzeEmail(email)); // Fallback to basic analysis
+      const fallbackResult = analyzeEmail(email);
+      setResult(fallbackResult);
+      
+      // Save fallback result to history if user is authenticated
+      if (user) {
+        await saveAnalysis('email', email, fallbackResult);
+      }
     }
     
     setIsAnalyzing(false);
@@ -112,6 +126,12 @@ export const EmailAnalyzer: React.FC<EmailAnalyzerProps> = ({ apiKeys }) => {
           <div className="flex items-center justify-center mt-2 text-green-400 text-sm">
             <Zap className="w-4 h-4 mr-1" />
             Enhanced with Hunter.io API
+          </div>
+        )}
+        {user && (
+          <div className="flex items-center justify-center mt-2 text-blue-400 text-sm">
+            <CheckCircle className="w-4 h-4 mr-1" />
+            Analysis will be saved to your history
           </div>
         )}
       </div>

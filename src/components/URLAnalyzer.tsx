@@ -1,9 +1,10 @@
-
 import React, { useState } from 'react';
 import { Link, AlertTriangle, CheckCircle, XCircle, Search, Zap } from 'lucide-react';
 import { analyzeURL } from '../utils/urlDetection';
 import { scanURLWithVirusTotal, checkURLWithURLVoid, checkURLWithPhishTank } from '../services/securityApis';
 import { SecurityResult } from './SecurityResult';
+import { useAuth } from '@/hooks/useAuth';
+import { useAnalysisHistory } from '@/hooks/useAnalysisHistory';
 
 interface URLAnalyzerProps {
   apiKeys?: {
@@ -17,6 +18,8 @@ export const URLAnalyzer: React.FC<URLAnalyzerProps> = ({ apiKeys }) => {
   const [url, setUrl] = useState('');
   const [result, setResult] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const { user } = useAuth();
+  const { saveAnalysis } = useAnalysisHistory();
 
   const handleAnalyze = async () => {
     if (!url.trim()) return;
@@ -95,9 +98,20 @@ export const URLAnalyzer: React.FC<URLAnalyzerProps> = ({ apiKeys }) => {
       enhancedResult.isSafe = enhancedResult.score >= 70 && highSeverityIssues === 0;
       
       setResult(enhancedResult);
+      
+      // Save to history if user is authenticated
+      if (user) {
+        await saveAnalysis('url', url, enhancedResult);
+      }
     } catch (error) {
       console.error('Analysis error:', error);
-      setResult(analyzeURL(url)); // Fallback to basic analysis
+      const fallbackResult = analyzeURL(url);
+      setResult(fallbackResult);
+      
+      // Save fallback result to history if user is authenticated
+      if (user) {
+        await saveAnalysis('url', url, fallbackResult);
+      }
     }
     
     setIsAnalyzing(false);
@@ -123,6 +137,12 @@ export const URLAnalyzer: React.FC<URLAnalyzerProps> = ({ apiKeys }) => {
           <div className="flex items-center justify-center mt-2 text-green-400 text-sm">
             <Zap className="w-4 h-4 mr-1" />
             Enhanced with {[apiKeys?.virusTotalKey && 'VirusTotal', apiKeys?.urlVoidKey && 'URLVoid'].filter(Boolean).join(' + ')} APIs
+          </div>
+        )}
+        {user && (
+          <div className="flex items-center justify-center mt-2 text-blue-400 text-sm">
+            <CheckCircle className="w-4 h-4 mr-1" />
+            Analysis will be saved to your history
           </div>
         )}
       </div>
