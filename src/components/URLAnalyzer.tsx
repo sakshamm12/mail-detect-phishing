@@ -1,211 +1,279 @@
-import React, { useState } from 'react';
-import { Link, AlertTriangle, CheckCircle, XCircle, Search, Zap } from 'lucide-react';
-import { analyzeURL } from '../utils/urlDetection';
-import { scanURLWithVirusTotal, checkURLWithURLVoid, checkURLWithPhishTank } from '../services/securityApis';
-import { SecurityResult } from './SecurityResult';
-import { useAuth } from '@/hooks/useAuth';
-import { useAnalysisHistory } from '@/hooks/useAnalysisHistory';
+import React, { useState, useEffect } from 'react';
+import { Settings, Key, Eye, EyeOff, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { testAPIConnectivity } from '../services/securityApis';
 
-interface URLAnalyzerProps {
-  apiKeys?: {
+interface APIConfigurationProps {
+  onConfigChange: (config: {
     virusTotalKey?: string;
     urlVoidKey?: string;
     emailRepKey?: string;
-  };
+  }) => void;
 }
 
-export const URLAnalyzer: React.FC<URLAnalyzerProps> = ({ apiKeys }) => {
-  const [url, setUrl] = useState('');
-  const [result, setResult] = useState<any>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const { user } = useAuth();
-  const { saveAnalysis } = useAnalysisHistory();
+export const APIConfiguration: React.FC<APIConfigurationProps> = ({ onConfigChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [showKeys, setShowKeys] = useState(false);
+  const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
+  const [connectivityStatus, setConnectivityStatus] = useState<{
+    hunter: boolean;
+    virusTotal: boolean;
+    urlVoid: boolean;
+    phishTank: boolean;
+  } | null>(null);
+  const [config, setConfig] = useState({
+    virusTotalKey: '',
+    urlVoidKey: '',
+    emailRepKey: ''
+  });
 
-  const handleAnalyze = async () => {
-    if (!url.trim()) return;
-    
-    setIsAnalyzing(true);
-    
+  useEffect(() => {
+    // Load saved API keys from localStorage
+    const saved = localStorage.getItem('security-api-config');
+    if (saved) {
+      const parsedConfig = JSON.parse(saved);
+      setConfig(parsedConfig);
+      onConfigChange(parsedConfig);
+    }
+  }, [onConfigChange]);
+
+  const handleSave = () => {
+    localStorage.setItem('security-api-config', JSON.stringify(config));
+    onConfigChange(config);
+    setConnectivityStatus(null); // Reset connectivity status when config changes
+    setIsOpen(false);
+  };
+
+  const handleTestConnectivity = async () => {
+    setIsTestingConnectivity(true);
     try {
-      // Basic analysis
-      const basicAnalysis = analyzeURL(url);
-      let enhancedResult = { ...basicAnalysis };
-      
-      // Enhanced analysis with APIs
-      const apiPromises = [];
-      
-      if (apiKeys?.virusTotalKey) {
-        console.log('Using VirusTotal API for URL scanning...');
-        apiPromises.push(scanURLWithVirusTotal(url, apiKeys.virusTotalKey));
-      }
-      
-      if (apiKeys?.urlVoidKey) {
-        console.log('Using URLVoid API for domain reputation...');
-        apiPromises.push(checkURLWithURLVoid(url, apiKeys.urlVoidKey));
-      }
-      
-      // Always try PhishTank (free)
-      console.log('Checking with PhishTank...');
-      apiPromises.push(checkURLWithPhishTank(url));
-      
-      if (apiPromises.length > 0) {
-        const apiResults = await Promise.allSettled(apiPromises);
-        
-        apiResults.forEach((result) => {
-          if (result.status === 'fulfilled' && result.value) {
-            const apiResult = result.value;
-            
-            if (apiResult.isMalicious) {
-              enhancedResult.issues.push({
-                type: 'Malicious URL Detected',
-                message: 'URL flagged as malicious by security databases',
-                severity: 'high'
-              });
-              enhancedResult.score = Math.max(0, enhancedResult.score - 60);
-            }
-            
-            if (apiResult.reputation < 50) {
-              enhancedResult.issues.push({
-                type: 'Poor Reputation',
-                message: `Domain has poor reputation (${Math.round(apiResult.reputation)}/100)`,
-                severity: 'medium'
-              });
-              enhancedResult.score = Math.max(0, enhancedResult.score - 25);
-            }
-            
-            if (apiResult.scanResults.length > 0) {
-              const maliciousScans = apiResult.scanResults.filter(scan => scan.result === 'malicious').length;
-              if (maliciousScans > 0) {
-                enhancedResult.recommendations.push(
-                  `${maliciousScans}/${apiResult.scanResults.length} security engines flagged this URL as malicious`
-                );
-              }
-            }
-          }
-        });
-      } else {
-        enhancedResult.recommendations.push('Configure API keys for enhanced threat detection');
-      }
-      
-      // Recalculate risk level
-      const highSeverityIssues = enhancedResult.issues.filter(i => i.severity === 'high').length;
-      if (enhancedResult.score < 40 || highSeverityIssues > 0) {
-        enhancedResult.riskLevel = 'high';
-      } else if (enhancedResult.score < 70) {
-        enhancedResult.riskLevel = 'medium';
-      }
-      
-      enhancedResult.isSafe = enhancedResult.score >= 70 && highSeverityIssues === 0;
-      
-      setResult(enhancedResult);
-      
-      // Save to history if user is authenticated
-      if (user) {
-        await saveAnalysis('url', url, enhancedResult);
-      }
+      const status = await testAPIConnectivity(config);
+      setConnectivityStatus(status);
     } catch (error) {
-      console.error('Analysis error:', error);
-      const fallbackResult = analyzeURL(url);
-      setResult(fallbackResult);
-      
-      // Save fallback result to history if user is authenticated
-      if (user) {
-        await saveAnalysis('url', url, fallbackResult);
-      }
+      console.error('Connectivity test failed:', error);
+      setConnectivityStatus({
+        hunter: false,
+        virusTotal: false,
+        urlVoid: false,
+        phishTank: false
+      });
+    } finally {
+      setIsTestingConnectivity(false);
     }
-    
-    setIsAnalyzing(false);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleAnalyze();
-    }
+  const handleInputChange = (key: string, value: string) => {
+    setConfig(prev => ({ ...prev, [key]: value }));
+    setConnectivityStatus(null); // Reset status when keys change
   };
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed top-4 right-4 bg-slate-700 hover:bg-slate-600 text-white p-3 rounded-lg transition-colors duration-200 flex items-center space-x-2 border border-slate-600"
+      >
+        <Settings className="w-5 h-5" />
+        <span>API Keys</span>
+      </button>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-white mb-2 flex items-center justify-center">
-          <Link className="w-6 h-6 mr-2 text-blue-400" />
-          Advanced Phishing Link Detector
-        </h2>
-        <p className="text-slate-300">
-          Analyze URLs and links with multiple security engines to detect phishing and malware
-        </p>
-        {(apiKeys?.virusTotalKey || apiKeys?.urlVoidKey) && (
-          <div className="flex items-center justify-center mt-2 text-green-400 text-sm">
-            <Zap className="w-4 h-4 mr-1" />
-            Enhanced with {[apiKeys?.virusTotalKey && 'VirusTotal', apiKeys?.urlVoidKey && 'URLVoid'].filter(Boolean).join(' + ')} APIs
-          </div>
-        )}
-        {user && (
-          <div className="flex items-center justify-center mt-2 text-blue-400 text-sm">
-            <CheckCircle className="w-4 h-4 mr-1" />
-            Analysis will be saved to your history
-          </div>
-        )}
-      </div>
-
-      <div className="space-y-4">
-        <div className="relative">
-          <input
-            type="url"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Enter URL to analyze (e.g., https://paypa1-security.com/login)"
-            className="w-full px-4 py-3 pl-12 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-300"
-          />
-          <Link className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
+    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-white flex items-center">
+            <Key className="w-5 h-5 mr-2 text-blue-400" />
+            API Configuration
+          </h2>
+          <button
+            onClick={() => setIsOpen(false)}
+            className="text-slate-400 hover:text-white"
+          >
+            ✕
+          </button>
         </div>
 
-        <button
-          onClick={handleAnalyze}
-          disabled={!url.trim() || isAnalyzing}
-          className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-slate-600 disabled:to-slate-700 text-white py-3 px-6 rounded-lg font-semibold transition-all duration-300 flex items-center justify-center space-x-2 shadow-lg"
-        >
-          {isAnalyzing ? (
-            <>
-              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-              <span>Scanning with Security APIs...</span>
-            </>
-          ) : (
-            <>
-              <Search className="w-5 h-5" />
-              <span>Analyze Link Security</span>
-            </>
-          )}
-        </button>
-      </div>
+        <div className="space-y-6">
+          <div className="bg-slate-700/30 rounded-lg p-4 border border-slate-600">
+            <h3 className="text-lg font-semibold text-white mb-2">Enhanced Security Scanning</h3>
+            <p className="text-slate-300 text-sm mb-4">
+              Connect your API keys to enable advanced threat detection using industry-leading security services. 
+              CORS proxy services are used to bypass browser restrictions.
+            </p>
+            
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-slate-300">Show API Keys</span>
+              <button
+                onClick={() => setShowKeys(!showKeys)}
+                className="flex items-center space-x-2 text-blue-400 hover:text-blue-300"
+              >
+                {showKeys ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                <span>{showKeys ? 'Hide' : 'Show'}</span>
+              </button>
+            </div>
+          </div>
 
-      {result && (
-        <SecurityResult
-          result={result}
-          type="url"
-          input={url}
-        />
-      )}
+          {/* CORS Notice */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5" />
+              <div>
+                <h4 className="text-blue-300 font-medium mb-1">CORS Proxy Notice</h4>
+                <p className="text-blue-200 text-sm">
+                  This application uses CORS proxy services to bypass browser restrictions when calling external APIs. 
+                  Your API keys are sent through these proxies, so only use test keys or keys with limited permissions.
+                </p>
+              </div>
+            </div>
+          </div>
 
-      {/* Example Section */}
-      <div className="mt-8 p-4 bg-slate-700/30 rounded-lg border border-slate-600">
-        <h3 className="text-lg font-semibold text-white mb-3">Try These Examples:</h3>
-        <div className="grid gap-2">
-          {[
-            'https://paypa1-security.com/login',
-            'http://amazom-security.net/verify',
-            'https://bit.ly/suspicious-link',
-            'https://secure-bank-login.tk/auth',
-            'https://microsoft-security-alert.ml/verify'
-          ].map((example) => (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                VirusTotal API Key
+                <span className="text-blue-400 ml-1">(URL Scanning)</span>
+              </label>
+              <input
+                type={showKeys ? 'text' : 'password'}
+                value={config.virusTotalKey}
+                onChange={(e) => handleInputChange('virusTotalKey', e.target.value)}
+                placeholder="Enter your VirusTotal API key"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Get free API key from <a href="https://www.virustotal.com/gui/join-us" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">VirusTotal</a>
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                URLVoid API Key
+                <span className="text-blue-400 ml-1">(Domain Reputation)</span>
+              </label>
+              <input
+                type={showKeys ? 'text' : 'password'}
+                value={config.urlVoidKey}
+                onChange={(e) => handleInputChange('urlVoidKey', e.target.value)}
+                placeholder="Enter your URLVoid API key"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Get API key from <a href="https://www.urlvoid.com/api/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">URLVoid</a>
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                Hunter.io API Key
+                <span className="text-blue-400 ml-1">(Email Verification)</span>
+              </label>
+              <input
+                type={showKeys ? 'text' : 'password'}
+                value={config.emailRepKey}
+                onChange={(e) => handleInputChange('emailRepKey', e.target.value)}
+                placeholder="Enter your Hunter.io API key"
+                className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Get free API key from <a href="https://hunter.io/api" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Hunter.io</a>
+              </p>
+            </div>
+          </div>
+
+          {/* Connectivity Test */}
+          <div className="bg-slate-700/30 rounded-lg p-4 border border-slate-600">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-white font-medium">API Connectivity Test</h4>
+              <button
+                onClick={handleTestConnectivity}
+                disabled={isTestingConnectivity}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center space-x-2"
+              >
+                {isTestingConnectivity ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Testing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wifi className="w-4 h-4" />
+                    <span>Test APIs</span>
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {connectivityStatus && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.hunter ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.hunter ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.hunter ? 'text-green-300' : 'text-red-300'}`}>
+                    Hunter.io
+                  </span>
+                </div>
+                
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.virusTotal ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.virusTotal ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.virusTotal ? 'text-green-300' : 'text-red-300'}`}>
+                    VirusTotal
+                  </span>
+                </div>
+                
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.urlVoid ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.urlVoid ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.urlVoid ? 'text-green-300' : 'text-red-300'}`}>
+                    URLVoid
+                  </span>
+                </div>
+                
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.phishTank ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.phishTank ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.phishTank ? 'text-green-300' : 'text-red-300'}`}>
+                    PhishTank
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
+            <p className="text-yellow-300 text-sm">
+              <strong>Security Warning:</strong> API keys are stored locally in your browser and sent through CORS proxy services. 
+              For production use, consider using server-side API calls or dedicated API keys with limited permissions.
+            </p>
+          </div>
+
+          <div className="flex space-x-4">
             <button
-              key={example}
-              onClick={() => setUrl(example)}
-              className="text-left p-2 text-blue-400 hover:text-blue-300 hover:bg-slate-700/50 rounded transition-colors duration-200 text-sm font-mono break-all"
+              onClick={handleSave}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 px-6 rounded-lg font-semibold transition-colors duration-200"
             >
-              {example}
+              Save Configuration
             </button>
-          ))}
+            <button
+              onClick={() => setIsOpen(false)}
+              className="flex-1 bg-slate-600 hover:bg-slate-700 text-white py-3 px-6 rounded-lg font-semibold transition-colors duration-200"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       </div>
     </div>
