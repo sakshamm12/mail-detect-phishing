@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { Settings, Key, Eye, EyeOff } from 'lucide-react';
+import { Settings, Key, Eye, EyeOff, Wifi, WifiOff, AlertTriangle } from 'lucide-react';
+import { testAPIConnectivity } from '../services/securityApis';
 
 interface APIConfigurationProps {
   onConfigChange: (config: {
@@ -13,6 +14,13 @@ interface APIConfigurationProps {
 export const APIConfiguration: React.FC<APIConfigurationProps> = ({ onConfigChange }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [showKeys, setShowKeys] = useState(false);
+  const [isTestingConnectivity, setIsTestingConnectivity] = useState(false);
+  const [connectivityStatus, setConnectivityStatus] = useState<{
+    hunter: boolean;
+    virusTotal: boolean;
+    urlVoid: boolean;
+    phishTank: boolean;
+  } | null>(null);
   const [config, setConfig] = useState({
     virusTotalKey: '',
     urlVoidKey: '',
@@ -32,11 +40,31 @@ export const APIConfiguration: React.FC<APIConfigurationProps> = ({ onConfigChan
   const handleSave = () => {
     localStorage.setItem('security-api-config', JSON.stringify(config));
     onConfigChange(config);
+    setConnectivityStatus(null); // Reset connectivity status when config changes
     setIsOpen(false);
+  };
+
+  const handleTestConnectivity = async () => {
+    setIsTestingConnectivity(true);
+    try {
+      const status = await testAPIConnectivity(config);
+      setConnectivityStatus(status);
+    } catch (error) {
+      console.error('Connectivity test failed:', error);
+      setConnectivityStatus({
+        hunter: false,
+        virusTotal: false,
+        urlVoid: false,
+        phishTank: false
+      });
+    } finally {
+      setIsTestingConnectivity(false);
+    }
   };
 
   const handleInputChange = (key: string, value: string) => {
     setConfig(prev => ({ ...prev, [key]: value }));
+    setConnectivityStatus(null); // Reset status when keys change
   };
 
   if (!isOpen) {
@@ -71,7 +99,8 @@ export const APIConfiguration: React.FC<APIConfigurationProps> = ({ onConfigChan
           <div className="bg-slate-700/30 rounded-lg p-4 border border-slate-600">
             <h3 className="text-lg font-semibold text-white mb-2">Enhanced Security Scanning</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Connect your API keys to enable advanced threat detection using industry-leading security services.
+              Connect your API keys to enable advanced threat detection using industry-leading security services. 
+              CORS proxy services are used to bypass browser restrictions.
             </p>
             
             <div className="flex items-center justify-between mb-4">
@@ -83,6 +112,20 @@ export const APIConfiguration: React.FC<APIConfigurationProps> = ({ onConfigChan
                 {showKeys ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 <span>{showKeys ? 'Hide' : 'Show'}</span>
               </button>
+            </div>
+          </div>
+
+          {/* CORS Notice */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-5 h-5 text-blue-400 mt-0.5" />
+              <div>
+                <h4 className="text-blue-300 font-medium mb-1">CORS Proxy Notice</h4>
+                <p className="text-blue-200 text-sm">
+                  This application uses CORS proxy services to bypass browser restrictions when calling external APIs. 
+                  Your API keys are sent through these proxies, so only use test keys or keys with limited permissions.
+                </p>
+              </div>
             </div>
           </div>
 
@@ -139,10 +182,82 @@ export const APIConfiguration: React.FC<APIConfigurationProps> = ({ onConfigChan
             </div>
           </div>
 
+          {/* Connectivity Test */}
+          <div className="bg-slate-700/30 rounded-lg p-4 border border-slate-600">
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="text-white font-medium">API Connectivity Test</h4>
+              <button
+                onClick={handleTestConnectivity}
+                disabled={isTestingConnectivity}
+                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 flex items-center space-x-2"
+              >
+                {isTestingConnectivity ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Testing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Wifi className="w-4 h-4" />
+                    <span>Test APIs</span>
+                  </>
+                )}
+              </button>
+            </div>
+            
+            {connectivityStatus && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.hunter ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.hunter ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.hunter ? 'text-green-300' : 'text-red-300'}`}>
+                    Hunter.io
+                  </span>
+                </div>
+                
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.virusTotal ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.virusTotal ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.virusTotal ? 'text-green-300' : 'text-red-300'}`}>
+                    VirusTotal
+                  </span>
+                </div>
+                
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.urlVoid ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.urlVoid ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.urlVoid ? 'text-green-300' : 'text-red-300'}`}>
+                    URLVoid
+                  </span>
+                </div>
+                
+                <div className={`flex items-center space-x-2 p-2 rounded ${connectivityStatus.phishTank ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+                  {connectivityStatus.phishTank ? (
+                    <Wifi className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <WifiOff className="w-4 h-4 text-red-400" />
+                  )}
+                  <span className={`text-sm ${connectivityStatus.phishTank ? 'text-green-300' : 'text-red-300'}`}>
+                    PhishTank
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4">
             <p className="text-yellow-300 text-sm">
-              <strong>Privacy Note:</strong> API keys are stored locally in your browser and never sent to our servers. 
-              They're only used to make direct API calls to the respective security services.
+              <strong>Security Warning:</strong> API keys are stored locally in your browser and sent through CORS proxy services. 
+              For production use, consider using server-side API calls or dedicated API keys with limited permissions.
             </p>
           </div>
 
