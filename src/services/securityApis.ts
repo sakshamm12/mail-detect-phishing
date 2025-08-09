@@ -1,5 +1,5 @@
 
-// Advanced security API integrations for email and URL validation
+// Security API integrations using Supabase Edge Functions to avoid CORS issues
 
 export interface APIKeyConfig {
   virusTotalKey?: string;
@@ -31,104 +31,137 @@ export interface AdvancedURLResult {
   }[];
 }
 
-// Hunter.io Email Verification (Free tier available)
+// Hunter.io Email Verification via Edge Function
 export const verifyEmailWithHunter = async (email: string, apiKey?: string): Promise<AdvancedEmailResult | null> => {
-  if (!apiKey) return null;
+  // Use edge function instead of direct API call to avoid CORS
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  if (!supabaseUrl) {
+    console.warn('Supabase URL not configured');
+    return null;
+  }
   
   try {
-    const response = await fetch(`https://api.hunter.io/v2/email-verifier?email=${encodeURIComponent(email)}&api_key=${apiKey}`);
+    const response = await fetch(`${supabaseUrl}/functions/v1/hunter-email-verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      },
+      body: JSON.stringify({ email })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     const data = await response.json();
     
-    if (data.data) {
+    if (data.error) {
+      console.warn('Hunter.io API error:', data.error);
+      return null;
+    }
+
+    if (data) {
       return {
-        isValid: data.data.result === 'deliverable',
-        isDisposable: data.data.disposable || false,
-        isCatchAll: data.data.accept_all || false,
-        reputation: data.data.result === 'deliverable' ? 'good' : data.data.result === 'risky' ? 'neutral' : 'poor',
-        deliverable: data.data.result === 'deliverable',
+        isValid: data.isValid,
+        isDisposable: data.isDisposable,
+        isCatchAll: false,
+        reputation: data.reputation,
+        deliverable: data.isValid,
         domain: {
           name: email.split('@')[1],
-          reputation: data.data.score || 50,
-          isBusinessDomain: !data.data.disposable && !data.data.webmail
+          reputation: data.domain.reputation,
+          isBusinessDomain: !data.isDisposable
         }
       };
     }
   } catch (error) {
-    console.error('Hunter.io API error:', error);
+    console.error('Hunter.io edge function error:', error);
   }
   
   return null;
 };
 
-// VirusTotal URL Scanner
+// VirusTotal URL Scanner via Edge Function
 export const scanURLWithVirusTotal = async (url: string, apiKey?: string): Promise<AdvancedURLResult | null> => {
-  if (!apiKey) return null;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  if (!supabaseUrl) {
+    console.warn('Supabase URL not configured');
+    return null;
+  }
   
   try {
-    // First, submit URL for scanning
-    const submitResponse = await fetch('https://www.virustotal.com/vtapi/v2/url/scan', {
+    const response = await fetch(`${supabaseUrl}/functions/v1/virus-total-scan`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
       },
-      body: `apikey=${apiKey}&url=${encodeURIComponent(url)}`
+      body: JSON.stringify({ url })
     });
     
-    if (!submitResponse.ok) throw new Error('Failed to submit URL');
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const data = await response.json();
     
-    // Wait a moment then get the report
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const reportResponse = await fetch(`https://www.virustotal.com/vtapi/v2/url/report?apikey=${apiKey}&resource=${encodeURIComponent(url)}`);
-    const data = await reportResponse.json();
-    
-    if (data.response_code === 1) {
-      const maliciousCount = data.positives || 0;
-      const totalScans = data.total || 1;
-      
+    if (data.error) {
+      console.warn('VirusTotal API error:', data.error);
+      return null;
+    }
+
+    if (data) {
       return {
-        isMalicious: maliciousCount > 0,
-        reputation: Math.max(0, 100 - (maliciousCount / totalScans) * 100),
-        categories: data.scan_date ? ['scanned'] : ['pending'],
-        lastSeen: data.scan_date || new Date().toISOString(),
-        scanResults: data.scans ? Object.entries(data.scans).map(([engine, result]: [string, any]) => ({
-          engine,
-          result: result.detected ? 'malicious' : 'clean'
-        })).slice(0, 5) : []
+        isMalicious: data.isMalicious,
+        reputation: data.reputation,
+        categories: ['scanned'],
+        lastSeen: new Date().toISOString(),
+        scanResults: data.scanResults
       };
     }
   } catch (error) {
-    console.error('VirusTotal API error:', error);
+    console.error('VirusTotal edge function error:', error);
   }
   
   return null;
 };
 
-// URLVoid URL Reputation Check
+// URLVoid URL Reputation Check via Edge Function
 export const checkURLWithURLVoid = async (url: string, apiKey?: string): Promise<AdvancedURLResult | null> => {
-  if (!apiKey) return null;
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  if (!supabaseUrl) {
+    console.warn('Supabase URL not configured');
+    return null;
+  }
   
   try {
-    const domain = new URL(url).hostname;
-    const response = await fetch(`https://api.urlvoid.com/v1/pay-as-you-go/?key=${apiKey}&host=${domain}`);
-    const text = await response.text();
+    const response = await fetch(`${supabaseUrl}/functions/v1/urlvoid-check`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      throw new Error(`HTTP error! status: ${response.status}`);
+      body: JSON.stringify({ url })
+    });
+    const data = await response.json();
     
-    // URLVoid returns XML, so we'll do basic parsing
-    const detections = (text.match(/<detection>/g) || []).length;
-    const engines = (text.match(/<engine>/g) || []).length;
+    if (data.error) {
+      console.warn('URLVoid API error:', data.error);
+      return null;
+    }
     
-    return {
-      isMalicious: detections > 0,
-      reputation: Math.max(0, 100 - (detections / Math.max(engines, 1)) * 100),
-      categories: detections > 0 ? ['malicious'] : ['clean'],
-      lastSeen: new Date().toISOString(),
-      scanResults: [{
-        engine: 'URLVoid',
-        result: detections > 0 ? 'malicious' : 'clean'
-      }]
-    };
+    if (data) {
+      return {
+        isMalicious: data.isMalicious,
+        reputation: data.reputation,
+        categories: data.isMalicious ? ['malicious'] : ['clean'],
+        lastSeen: new Date().toISOString(),
+        scanResults: data.scanResults
+      };
+    }
   } catch (error) {
-    console.error('URLVoid API error:', error);
+    console.error('URLVoid edge function error:', error);
   }
   
   return null;
@@ -136,30 +169,12 @@ export const checkURLWithURLVoid = async (url: string, apiKey?: string): Promise
 
 // PhishTank URL Check (Free API)
 export const checkURLWithPhishTank = async (url: string): Promise<AdvancedURLResult | null> => {
+  // PhishTank has CORS restrictions, but we can try with a fallback approach
   try {
-    const response = await fetch('https://checkurl.phishtank.com/checkurl/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Safe Mail Detective'
-      },
-      body: `url=${encodeURIComponent(url)}&format=json&app_key=your_app_key`
-    });
-    
-    const data = await response.json();
-    
-    if (data.results) {
-      return {
-        isMalicious: data.results.in_database && data.results.verified,
-        reputation: data.results.in_database && data.results.verified ? 0 : 100,
-        categories: data.results.in_database ? ['phishing'] : ['clean'],
-        lastSeen: data.results.verification_time || new Date().toISOString(),
-        scanResults: [{
-          engine: 'PhishTank',
-          result: data.results.in_database && data.results.verified ? 'malicious' : 'clean'
-        }]
-      };
-    }
+    // For now, return null as PhishTank requires server-side implementation
+    // This could be implemented as another edge function if needed
+    console.log('PhishTank check skipped due to CORS restrictions');
+    return null;
   } catch (error) {
     console.error('PhishTank API error:', error);
   }
